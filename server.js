@@ -10,6 +10,7 @@ var cheerio = require("cheerio");
 // Requiring note, article and index models
 var db = require("./models");
 
+
 var PORT = process.env.PORT || 3000;
 
 // Initialize Express
@@ -18,7 +19,7 @@ var app = express();
 // Use morgan logger for logging requests
 app.use(logger("dev"));
 // Parse request body as JSON
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 // Make public a static folder
 app.use(express.static("public"));
@@ -28,40 +29,39 @@ app.engine("handlebars", exphbs({
 }));
 app.set("view engine", "handlebars");
 
-// Connect to the Mongo DB'
+// If deployed, use the deployed database. Otherwise use the local mongoHeadlines database
+var MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost/mongoHeadlines";
 
-var databaseUri = "mongodb://localhost/Mongo-Scraper";
+// Connect to the Mongo DB
+mongoose.connect(MONGODB_URI);
 
-if (process.env.MONGODB_URI) {
-    mongoose.connect(process.env.MONGODB_URI);
-} else {
-    mongoose.connect(databaseUri, { useNewUrlParser: true });
-}
-
-var mongo = mongoose.connection;
+console.log("connected to mongoose!")
 
 app.listen(PORT, function () {
-    console.log("App running on port " + PORT + "!");
+    console.log("App running on port: " + PORT + "!");
 });
 
-// A GET route for scraping the cosmo website
+// A GET route for scraping the bored panda website
 app.get("/scrape", function (req, res) {
     // First, we grab the body of the html with axios
     axios.get("https://www.boredpanda.com/").then(function (response) {
         // Then, we load that into cheerio and save it to $ for a shorthand selector
         var $ = cheerio.load(response.data);
-        $("h2 .title").each(function (i, element) {
-            var result = {};
-
-            result.title = $(this).children("a").text();
-            result.link = $(this).children("a").attr("href");
+        $(".post").each(function (i, element) {
+            var result = {
+                title: $(this).find("h2").text().trim(),
+                url: $(this).find("a").attr("href"),
+                summary: $(this).find(".intro").text().trim()
+            }
+            // result.title = $(this).children("a").text();
+            // result.link = $(this).children("a").attr("href");
 
             console.log(result);
             // Create a new Article using the `result` object built from scraping
-            db.articles.create(result)
-                .then(function (dbarticles) {
+            db.Article.create(result)
+                .then(function (dbArticle) {
                     // View the added result in the console
-                    console.log(dbarticles);
+                    console.log(dbArticle);
                 })
                 .catch(function (err) {
                     // If an error occurred, log it
@@ -76,10 +76,10 @@ app.get("/scrape", function (req, res) {
 
     app.get("/articles", function (req, res) {
         // Grab every document in the Articles collection
-        db.Articles.find({})
-            .then(function (dbArticles) {
+        db.Article.find({})
+            .then(function (dbArticle) {
                 // If we were able to successfully find Articles, send them back to the client
-                res.json(dbArticles);
+                res.json(dbArticle);
             })
             .catch(function (err) {
                 // If an error occurred, send it to the client
@@ -90,7 +90,7 @@ app.get("/scrape", function (req, res) {
     // Route for grabbing a specific Article by id, populate it with it's note
     app.get("/articles/:id", function (req, res) {
         // Using the id passed in the id parameter, prepare a query that finds the matching one in our db...
-        db.Article.findOne({ _id: req.params.id })
+        db.articles.findOne({ _id: req.params.id })
             // ..and populate all of the notes associated with it
             .populate("note")
             .then(function (dbArticle) {
